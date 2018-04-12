@@ -13,10 +13,12 @@ Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *motor1 = AFMS.getMotor(1);
 Adafruit_DCMotor *motor2 = AFMS.getMotor(2);
 Adafruit_DCMotor *motor3 = AFMS.getMotor(3);
+// Disposal motor
+Adafruit_DCMotor *motor4 = AFMS.getMotor(4);
 
 MPU6050 mpu;
 
-// MPU control/status vars
+// MPU control/status variables
 bool dmpReady = false;  // set true if DMP init was successful
 uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
 uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
@@ -24,7 +26,7 @@ uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
 uint16_t fifoCount;     // count of all bytes currently in FIFO
 uint8_t fifoBuffer[64]; // FIFO storage buffer
 
-// orientation/motion vars
+// Orientation/motion variables
 Quaternion q;           // [w, x, y, z]         quaternion container
 VectorFloat gravity;    // [x, y, z]            gravity vector
 float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container
@@ -35,32 +37,17 @@ void dmpDataReady() {
   mpuInterrupt = true;
 }
 
-// Arduino pin attatchments
-const int mpuInt = 2; 
+// PID variables - P for pitch, R for roll
+const int Pkp = 15, Rkp = 15; // Proportional: angle from balance point
+const int Pki = 2, Rki = 2;  // Integral: past trends of values
+const int Pkd = 20, Rkd = 20; // Derivative: angular velocity of robot
+int Perror = 0, Rerror = 0;     // Deviation from desired upright point based on kp, ki, and kd
 
-// Pitch PID variables
-const int Pkp = 15; // Proportional: angle from balance point
-const int Pki = 2;  // Integral: past trends of values
-const int Pkd = 20; // Derivative: angular velocity of robot
-int Perror = 0;     // Deviation from desired upright point based on kp, ki, and kd
-
-// Roll PID variables
-const int Rkp = 15; // Proportional: angle from balance point
-const int Rki = 2;  // Integral: past trends of values
-const int Rkd = 20; // Derivative: angular velocity of robot
-int Rerror = 0;     // Deviation from desired upright point based on kp, ki, and kd
-
-// Pitch Other variables
-float Pangle = 0, PlastAngle = 0; // Current and previous angle values
-float PangularVelocity = 0;      // Angular velocity of robot
-float PbalancePoint = 0;       // An offset to couteract the misaligned center of gravity
-short signed int Pintegral = 0;  // The "integral" of the plotted angles
-
-// Roll Other variables
-float Rangle = 0, RlastAngle = 0; // Current and previous angle values
-float RangularVelocity = 0;      // Angular velocity of robot
-float RbalancePoint = 0;       // An offset to couteract the misaligned center of gravity
-short signed int Rintegral = 0;  // The "integral" of the plotted angles
+// Other variables - P for pitch, R for roll
+float Pangle = 0, PlastAngle = 0, Rangle = 0, RlastAngle = 0; // Current and previous angle values
+float PangularVelocity = 0, RangularVelocity = 0;;      // Angular velocity of robot
+float PbalancePoint = 2.9, RbalancePoint = 2.6;       // An offset to couteract the misaligned center of gravity
+short signed int Pintegral = 0, Rintegral = 0;  // The "integral" of the plotted angles
 
 void setup() {
   mpuSetup();
@@ -74,12 +61,11 @@ void setup() {
 void loop() {
   mpuLoop();
 
-  // Converting the angles into degrees:
-  Pangle = (ypr[2] * 180/M_PI) - PbalancePoint;
+  // Converting the angles into degrees (P for pitch, R for roll):
   Rangle = (ypr[1] * 180/M_PI) - RbalancePoint;
+  Pangle = (ypr[2] * 180/M_PI) - PbalancePoint;
 
-  // Feeding the angle values into an array and summing them caused
-  // errors, so I will use this cheap integral shortcut:
+  // Feeding the angle values into an array and summing them caused errors, so I will use this cheap integral shortcut:
   
   // Pitch
   if(abs(Pintegral) > 5){
@@ -97,8 +83,8 @@ void loop() {
     Pintegral++;
   }
   
- // Roll
-    if(abs(Rintegral) > 5){
+  // Roll
+  if(abs(Rintegral) > 5){
     // This limits the magnitude of the integral to +/-5:
     if(Rintegral > 0){
       Rintegral--;
@@ -125,28 +111,29 @@ void loop() {
   PlastAngle = Pangle;
   RlastAngle = Rangle;
 
-  int pitchSpeed = map(abs(Perror), 0, 320, 0, 255);
-  int rollSpeed = map(abs(Rerror), 0, 320, 0, 255);
+  // Setting the motor speeds. PWM outputs go from 0 to 255 so we map
+  int pitchSpeed = map(abs(Perror), 0, 320, 60, 255);
+  int rollSpeed = map(abs(Rerror), 0, 320, 60, 255);
   
   if(pitchSpeed > 255){pitchSpeed = 255;}
-  if(pitchSpeed < 40){pitchSpeed = 0;}
+  if(pitchSpeed < 30){pitchSpeed = 0;}
   if(rollSpeed > 255){rollSpeed = 255;}
-  if(rollSpeed < 40){rollSpeed = 0;}
+  if(rollSpeed < 30){rollSpeed = 0;}
 
 // ==========================================================================================
 //                                 Print Statements
 // ==========================================================================================
 
-  Serial.print("Angles:\t");
+  Serial.print("Angles (P R):\t");
   Serial.print(Pangle);
   Serial.print("\t");
   Serial.print(Rangle);
   Serial.print("\t");
-  Serial.print("Errors:\t");
+  Serial.print("Errors (P R):\t");
   Serial.print(Perror);
   Serial.print("\t");
   Serial.println(Rerror);
-  Serial.print("Speeds:\t");
+  Serial.print("Speeds (P R):\t");
   Serial.print(pitchSpeed);
   Serial.print("\t");
   Serial.print(rollSpeed);
@@ -155,52 +142,33 @@ void loop() {
 // ==========================================================================================
 //                    Setting the speed and direction of the motors
 // ==========================================================================================
-  
 
-  if(abs(Perror) < 10 || abs(Pangle) > 40){
-    // Turn off the motors if tilting too far, or if well-balanced:
-    motor1->run(RELEASE);
-    motor2->run(RELEASE);
-    motor3->run(RELEASE);
+  delay(2);
+   // Pitch:
+  if((abs(Perror) < 20 && abs(Rangle) < 5) || abs(Pangle) > 40){
+    motor1->run(RELEASE); motor2->run(RELEASE); motor3->run(RELEASE);
   } else if(Perror < 0){
-    motor1->run(RELEASE);
-    motor2->run(BACKWARD);
-    motor3->run(BACKWARD);
-
-    // Setting the motor speeds. PWM outputs go from 0 to 255 so we map
-    motor2->setSpeed(pitchSpeed);
-    motor3->setSpeed(pitchSpeed);
+    motor1->run(RELEASE); motor1->setSpeed(pitchSpeed);
+    motor2->run(BACKWARD); motor2->setSpeed(pitchSpeed);
+    motor3->run(BACKWARD); motor3->setSpeed(pitchSpeed);
   } else {
-    motor1->run(RELEASE);
-    motor2->run(FORWARD);
-    motor3->run(FORWARD);
-
-    motor2->setSpeed(pitchSpeed);
-    motor3->setSpeed(pitchSpeed);
+    motor1->run(RELEASE); motor1->setSpeed(pitchSpeed);
+    motor2->run(FORWARD); motor2->setSpeed(pitchSpeed);
+    motor3->run(FORWARD); motor3->setSpeed(pitchSpeed);
   }
-
-    // Setting the speed and direction of the motors for Roll:
-  if(abs(Rerror) < 10 || abs(Rangle) > 40){
-    // Turn off the motors if tilting too far, or if well-balanced:
-    motor1->run(RELEASE);
-    motor2->run(RELEASE);
-    motor3->run(RELEASE);
+  
+  delay(2);
+    // Roll:
+  if((abs(Rerror) < 20 && abs(Pangle) < 5) || abs(Rangle) > 40){
+    motor1->run(RELEASE); motor2->run(RELEASE); motor3->run(RELEASE);
   } else if(Rerror < 0){
-    motor1->run(BACKWARD);
-    motor2->run(BACKWARD);
-    motor3->run(BACKWARD);
-    
-    motor1->setSpeed(rollSpeed);
-    motor2->setSpeed(rollSpeed/2);
-    motor3->setSpeed(rollSpeed/2);
+    motor1->run(BACKWARD); motor1->setSpeed(rollSpeed);
+    motor2->run(BACKWARD); motor2->setSpeed(rollSpeed/2);
+    motor3->run(BACKWARD); motor3->setSpeed(rollSpeed/2);
   } else {
-    motor1->run(FORWARD);
-    motor2->run(FORWARD);
-    motor3->run(FORWARD);
-
-    motor1->setSpeed(rollSpeed);
-    motor2->setSpeed(rollSpeed/2);
-    motor3->setSpeed(rollSpeed/2);
+    motor1->run(FORWARD); motor1->setSpeed(rollSpeed);
+    motor2->run(FORWARD); motor2->setSpeed(rollSpeed/2);
+    motor3->run(FORWARD); motor3->setSpeed(rollSpeed/2);
   }
 }
 
