@@ -10,11 +10,11 @@
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
  
 // Select which 'port' M1, M2, M3 or M4. In this case, M1
-Adafruit_DCMotor *motor1 = AFMS.getMotor(1);
+Adafruit_DCMotor *motor1 = AFMS.getMotor(4);
 Adafruit_DCMotor *motor2 = AFMS.getMotor(2);
 Adafruit_DCMotor *motor3 = AFMS.getMotor(3);
 // Disposal motor
-Adafruit_DCMotor *motor4 = AFMS.getMotor(4);
+//Adafruit_DCMotor *motor4 = AFMS.getMotor(4);
 
 MPU6050 mpu;
 
@@ -45,9 +45,11 @@ int Perror = 0, Rerror = 0;     // Deviation from desired upright point based on
 
 // Other variables - P for pitch, R for roll
 float Pangle = 0, PlastAngle = 0, Rangle = 0, RlastAngle = 0; // Current and previous angle values
-float PangularVelocity = 0, RangularVelocity = 0;;      // Angular velocity of robot
-float PbalancePoint = 2.9, RbalancePoint = 2.6;       // An offset to couteract the misaligned center of gravity
+float PangularVelocity = 0, RangularVelocity = 0;      // Angular velocity of robot
+float PbalancePoint = 4.25, RbalancePoint = 2.25;       // An offset to couteract the misaligned center of gravity
 short signed int Pintegral = 0, Rintegral = 0;  // The "integral" of the plotted angles
+
+float angle;
 
 void setup() {
   mpuSetup();
@@ -64,6 +66,8 @@ void loop() {
   // Converting the angles into degrees (P for pitch, R for roll):
   Rangle = (ypr[1] * 180/M_PI) - RbalancePoint;
   Pangle = (ypr[2] * 180/M_PI) - PbalancePoint;
+
+  angle = atan2(Pangle, Rangle);
 
   // Feeding the angle values into an array and summing them caused errors, so I will use this cheap integral shortcut:
   
@@ -112,13 +116,13 @@ void loop() {
   RlastAngle = Rangle;
 
   // Setting the motor speeds. PWM outputs go from 0 to 255 so we map
-  int pitchSpeed = map(abs(Perror), 0, 320, 60, 255);
-  int rollSpeed = map(abs(Rerror), 0, 320, 60, 255);
+  int pitchSpeed = map(abs(Perror), 20, 300, 120, 255);
+  int rollSpeed = map(abs(Rerror), 20, 300, 120, 255);
   
-  if(pitchSpeed > 255){pitchSpeed = 255;}
   if(pitchSpeed < 30){pitchSpeed = 0;}
-  if(rollSpeed > 255){rollSpeed = 255;}
+  if(pitchSpeed > 255){pitchSpeed = 255;}
   if(rollSpeed < 30){rollSpeed = 0;}
+  if(rollSpeed > 255){rollSpeed = 255;}
 
 // ==========================================================================================
 //                                 Print Statements
@@ -143,33 +147,53 @@ void loop() {
 //                    Setting the speed and direction of the motors
 // ==========================================================================================
 
-  delay(2);
-   // Pitch:
-  if((abs(Perror) < 20 && abs(Rangle) < 5) || abs(Pangle) > 40){
-    motor1->run(RELEASE); motor2->run(RELEASE); motor3->run(RELEASE);
-  } else if(Perror < 0){
-    motor1->run(RELEASE); motor1->setSpeed(pitchSpeed);
-    motor2->run(BACKWARD); motor2->setSpeed(pitchSpeed);
-    motor3->run(BACKWARD); motor3->setSpeed(pitchSpeed);
+  Serial.print("Correcting: ");
+  Serial.print("\t");
+
+boolean rRun, pRun;
+
+  if (abs(Rerror) > abs(Perror)) {
+    rRun = true;
+    pRun = false;
   } else {
-    motor1->run(RELEASE); motor1->setSpeed(pitchSpeed);
-    motor2->run(FORWARD); motor2->setSpeed(pitchSpeed);
-    motor3->run(FORWARD); motor3->setSpeed(pitchSpeed);
+    pRun = true;
+    rRun = false;
   }
-  
-  delay(2);
-    // Roll:
-  if((abs(Rerror) < 20 && abs(Pangle) < 5) || abs(Rangle) > 40){
+
+   // Roll:
+  if((abs(Rerror) < 30 && abs(Pangle) < 5) || abs(Rangle) > 60){
     motor1->run(RELEASE); motor2->run(RELEASE); motor3->run(RELEASE);
-  } else if(Rerror < 0){
-    motor1->run(BACKWARD); motor1->setSpeed(rollSpeed);
-    motor2->run(BACKWARD); motor2->setSpeed(rollSpeed/2);
-    motor3->run(BACKWARD); motor3->setSpeed(rollSpeed/2);
-  } else {
-    motor1->run(FORWARD); motor1->setSpeed(rollSpeed);
-    motor2->run(FORWARD); motor2->setSpeed(rollSpeed/2);
-    motor3->run(FORWARD); motor3->setSpeed(rollSpeed/2);
+  } else if(Rerror < 0 && rRun){
+    motor1->run(RELEASE); motor1->setSpeed(rollSpeed);
+    motor2->run(BACKWARD); motor2->setSpeed(rollSpeed);
+    motor3->run(FORWARD); motor3->setSpeed(rollSpeed);
+    Serial.print("Roll");
+    Serial.print("\t");
+  } else if(rRun){
+    motor1->run(RELEASE); motor1->setSpeed(rollSpeed);
+    motor2->run(FORWARD); motor2->setSpeed(rollSpeed);
+    motor3->run(BACKWARD); motor3->setSpeed(rollSpeed);
+    Serial.print("Roll");
+    Serial.print("\t");
   }
+  delay(10);
+    // Pitch:
+  if((abs(Perror) < 30 && abs(Rangle) < 5) || abs(Pangle) > 60){
+    motor1->run(RELEASE); motor2->run(RELEASE); motor3->run(RELEASE);
+  } else if(Perror < 0 && pRun){
+    motor1->run(BACKWARD); motor1->setSpeed(pitchSpeed);
+    motor2->run(FORWARD); motor2->setSpeed(pitchSpeed/2);
+    motor3->run(FORWARD); motor3->setSpeed(pitchSpeed/2);
+    Serial.print("Pitch");
+    Serial.print("\t");
+  } else if(pRun){
+    motor1->run(FORWARD); motor1->setSpeed(pitchSpeed);
+    motor2->run(BACKWARD); motor2->setSpeed(pitchSpeed/2);
+    motor3->run(BACKWARD); motor3->setSpeed(pitchSpeed/2);
+    Serial.print("Pitch");
+    Serial.print("\t");
+  }
+  delay(10);
 }
 
 
